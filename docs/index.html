@@ -511,6 +511,13 @@
         <option value="predicted_linear_regression">Linear Regression</option>
         <option value="predicted_random_forest">Random Forest</option>
       </select>
+      <select class="model-select" id="page-size-select" aria-label="Rows to show">
+        <option value="10">Show 10</option>
+        <option value="20">Show 20</option>
+        <option value="50" selected>Show 50</option>
+        <option value="100">Show 100</option>
+        <option value="500">Show 500</option>
+      </select>
     </div>
     <div class="table-wrap">
       <table class="players">
@@ -650,7 +657,7 @@
     }).join("");
   }
 
-  var state = { query: "", season: "all", model: "predicted_ridge", sortKey: "gap", sortDir: "desc" };
+  var state = { query: "", season: "all", model: "predicted_ridge", sortKey: "gap", sortDir: "desc", pageSize: 50 };
 
   function getVal(row, key) {
     if (key === "predicted") return row[IDX[state.model]];
@@ -674,17 +681,16 @@
     return out;
   }
 
-  var RENDER_CAP = 400;
-
   function renderTable() {
     var tbody = document.getElementById("table-body");
     var data = filteredRows();
     var countEl = document.getElementById("result-count");
+    var pageSize = state.pageSize;
     if (!data.length) {
       countEl.textContent = "0 of " + rows.length + " player-seasons";
-    } else if (data.length > RENDER_CAP) {
-      countEl.textContent = "Showing " + RENDER_CAP + " of " + data.length +
-        " matching player-seasons (sorted by " + state.sortKey + ") — narrow with search or a season filter to see the rest.";
+    } else if (data.length > pageSize) {
+      countEl.textContent = "Showing " + pageSize + " of " + data.length +
+        " matching player-seasons (sorted by " + state.sortKey + ") — narrow with search or a season filter, or show more, to see the rest.";
     } else {
       countEl.textContent = data.length + " of " + rows.length + " player-seasons";
     }
@@ -697,7 +703,7 @@
     var maxAbsGap = 1;
     data.forEach(function (r) { maxAbsGap = Math.max(maxAbsGap, Math.abs(getVal(r, "gap"))); });
 
-    tbody.innerHTML = data.slice(0, RENDER_CAP).map(function (r) {
+    tbody.innerHTML = data.slice(0, pageSize).map(function (r) {
       var actual = r[IDX.actual_eur];
       var predicted = getVal(r, "predicted");
       var gap = predicted - actual;
@@ -747,6 +753,11 @@
 
   document.getElementById("model-select").addEventListener("change", function (e) {
     state.model = e.target.value;
+    renderTable();
+  });
+
+  document.getElementById("page-size-select").addEventListener("change", function (e) {
+    state.pageSize = parseInt(e.target.value, 10);
     renderTable();
   });
 
