@@ -9,8 +9,8 @@ coefficients under collinearity, and where a linear model is simply the
 wrong tool.
 
 Data: [transfermarkt-datasets](https://github.com/dcaribou/transfermarkt-datasets)
-(CC0). Scope: Premier League only (`competition_id == "GB1"`), last 4
-completed seasons.
+(CC0). Scope: Premier League only (`competition_id == "GB1"`), last 10
+completed seasons (a full decade: 2016-17 through 2025-26).
 
 ## How to run
 
@@ -43,25 +43,26 @@ are cached on disk and only re-downloaded with `force=True`.
 | `src/predict.py` | CLI: look up one player-season's predicted vs actual value |
 | `src/visualize.py` | The 4 required matplotlib charts |
 
-## Results (test season: 2025, trained on 2022-2024)
+## Results (test season: 2025, trained on 2016-2024)
 
 | Model | MAE (EUR) | RMSE (EUR) | R² (log-value scale) |
 |---|---:|---:|---:|
-| Position-median baseline | 15,712,869 | 24,341,083 | 0.068 |
-| Linear Regression | 10,809,573 | 16,969,092 | 0.624 |
-| **Ridge** (α=0.1, 5-fold CV) | **10,808,850** | **16,971,402** | **0.624** |
-| Random Forest | 10,976,277 | 17,677,456 | 0.603 |
+| Position-median baseline | 17,097,890 | 26,274,706 | -0.038 |
+| Linear Regression | 12,820,811 | 19,543,224 | 0.482 |
+| **Ridge** (α≈0.032, 5-fold CV) | **12,820,757** | **19,543,142** | **0.482** |
+| Random Forest | 12,922,338 | 20,070,577 | 0.443 |
 
 R² is reported on the log1p scale because that's the scale the models were
 actually fit on and optimized for; an R² computed on raw euros would be
 dominated by the handful of 100M+ outliers and would mostly just measure
 "did you get Haaland roughly right," not overall fit quality.
 
-**The stats-only model clears the naive baseline by a wide margin** (R² 0.62
-vs 0.07) - so season performance genuinely carries signal about market
-value, not just "attackers are worth more than defenders." Ridge and plain
+**The stats-only model clears the naive baseline by a wide margin** (R² 0.48
+vs -0.04 - the baseline is now *worse than predicting the training mean*)
+- so season performance genuinely carries signal about market value, not
+just "attackers are worth more than defenders." Ridge and plain
 LinearRegression land at essentially identical accuracy (the selected
-α=0.1 is small, meaning little regularization was actually needed to
+α≈0.032 is small, meaning little regularization was actually needed to
 generalize to the 2025 season) - but their *coefficients* are not equally
 trustworthy; see the collinearity section below for why we read Ridge's.
 
@@ -70,28 +71,48 @@ going in - trees are usually assumed to beat linear models "for free" by
 capturing non-linearities. Two likely reasons: (1) with `age_squared`
 already added, the main non-linear relationship in this data is handled
 explicitly, closing most of the gap a tree would otherwise win back, and
-(2) with only 1,465 training rows and default hyperparameters, the forest
-has less to work with per split and no tuning to avoid overfitting to
-idiosyncratic training-season players. This is a real, checkable result,
-not a hand-wave - see `reports/metrics.json`.
+(2) even with 4,258 training rows and default hyperparameters, the forest
+has no tuning to avoid overfitting to idiosyncratic training-season
+players. This is a real, checkable result, not a hand-wave - see
+`reports/metrics.json`.
+
+**Widening the window from 4 seasons to 10 seasons actually lowered R²**
+(0.62 -> 0.48) rather than raising it, which is the single most important
+result of extending the scope and is worth understanding rather than
+glossing over. More training rows should help a model generalize - and
+it would, if the relationship between stats and value were stable over
+time. It isn't: Premier League transfer valuations have grown
+substantially since 2016-17 (broadcast deal growth, inflation, wealthier
+ownership groups), and **no feature in this project encodes which year a
+row is from**. A below-average 2025 midfielder and an above-average 2017
+midfielder with matching stats get an identical prediction, even though
+the real market would price them very differently. Over a short 4-season
+window that effect is small enough to ignore; over a full decade it
+becomes the dominant source of error, which is exactly why the naive
+position-median baseline (blending medians across 10 seasons of a rising
+market) got so much worse that it went negative. The honest fix would be
+an explicit season/year feature or a year-indexed inflation adjustment on
+the target - deliberately left out here so this result stays visible
+rather than quietly regressed away.
 
 ## Charts (`reports/`)
 
 - `predicted_vs_actual.png` - tight along y=x under ~EUR30M, but the model
   systematically **under-predicts** the handful of highest-value stars
-  (e.g. the actual 200M player is predicted at ~143M). This is the single
-  clearest visual evidence of the model's biggest weakness - see below.
+  (e.g. Erling Haaland's actual EUR200M is predicted at ~EUR150M). This is
+  the single clearest visual evidence of the model's biggest weakness - see
+  below.
 - `residuals_vs_predicted.png` - residual spread visibly widens as
   predicted value increases (heteroscedasticity): the model is precise for
   squad players, much less precise for stars.
 - `ridge_coefficients.png` - `age_at_season_end` (+2.7) and `age_squared`
-  (-4.3) are the two largest-magnitude coefficients, and their opposite
+  (-3.2) are the two largest-magnitude coefficients, and their opposite
   signs are exactly the point: value rises with age then falls, a
   parabola no single linear age term could represent. `minutes_played` is
   the next strongest positive driver.
 - `over_under_valued.png` - the 15 players the market pays most *above*
-  what their raw stats predict (Declan Rice, William Saliba, Alexander
-  Isak, Bukayo Saka, Erling Haaland...) and the 15 it pays *below*
+  what their raw stats predict (William Saliba, Declan Rice, Moises
+  Caicedo, Bukayo Saka, Alexander Isak...) and the 15 it pays *below*
   (mostly squad/rotation players at mid-table clubs). This list is itself
   evidence for the limitations section: nearly every "overvalued" name is
   an elite, high-reputation, high-marketability player - exactly the
@@ -110,21 +131,21 @@ more than goals/assists. A linear model also can't cap or floor a
 prediction - it will happily extrapolate a nonsensical value for a stat
 combination outside the training range. The RandomForest exists in this
 project specifically to measure that cost, and here the cost turned out to
-be small (R² 0.60 vs 0.62) - evidence the *available* features are mostly
+be small (R² 0.44 vs 0.48) - evidence the *available* features are mostly
 linear-ish once age is fixed, not evidence that value itself is linear.
 
 **Which features are collinear** (correlation matrix computed on the
 actual feature set):
-- `appearances` and `minutes_played`: r = 0.89 - nearly redundant; both
+- `appearances` and `minutes_played`: r = 0.91 - nearly redundant; both
   measure "how much did this player play."
-- `goals` and `goals_per_90`: r = 0.75; `assists` and `assists_per_90`:
-  r = 0.67 - the per-90 rate is derived from the raw count and shares its
+- `goals` and `goals_per_90`: r = 0.77; `assists` and `assists_per_90`:
+  r = 0.70 - the per-90 rate is derived from the raw count and shares its
   numerator, so of course they move together.
 - `age_at_season_end` and `age_squared`: r = 1.00 by construction - this
   one is *intentional* collinearity (a polynomial term), not accidental,
   and is exactly why Ridge's coefficients are the trustworthy ones (see
   below), not plain OLS's.
-- `appearances`/`minutes_played` and `yellow_cards`: r ~0.57-0.59 - more
+- `appearances`/`minutes_played` and `yellow_cards`: r ~0.54-0.57 - more
   minutes simply means more opportunities to be booked, not that playing
   time causes cards.
 
@@ -141,7 +162,7 @@ prospect and a 34-year-old veteran, which can't represent a peak at all.
 The fix used here is the standard one for representing non-monotonic
 effects while staying inside a linear model: add `age_at_season_end ** 2`
 as a second feature, so the model fits `b1*age + b2*age^2`, a curve
-instead of a line. The fitted signs (`age`: +2.7, `age_squared`: -4.3)
+instead of a line. The fitted signs (`age`: +2.7, `age_squared`: -3.2)
 confirm the expected rise-then-fall shape.
 
 **What the model fundamentally cannot know**, and roughly how much of the
@@ -151,17 +172,28 @@ history, international reputation, and resale/potential value for young
 players. The evidence for how much this matters is in the charts: for the
 bulk of the test season (~EUR 30M and under) predictions track the y=x
 line closely, meaning stats alone explain most of the variance for
-ordinary squad players. Nearly all of the model's largest errors -
-Haaland, Saka, Saliba, Rice, Isak - are elite players whose value is
-driven by reputation and marketability on top of, not instead of, good
-stats; the model captures the "good stats" part but has no feature for
-the premium the market adds on top. Given the overall MAE is ~EUR 10.8M
-but the worst individual errors reach EUR 70-98M concentrated in a small
-number of star players, it's fair to say intangibles this model can't see
-account for a small fraction of *total* prediction count that's wrong but
-a large fraction of the *largest* errors by euro amount - the model is
-good at pricing depth players and bad at pricing stars, which is the
-opposite of what a scout would find most useful.
+ordinary squad players. Nearly all of the model's largest errors - Saliba,
+Rice, Caicedo, Saka, Isak - are elite players whose value is driven by
+reputation and marketability on top of, not instead of, good stats; the
+model captures the "good stats" part but has no feature for the premium
+the market adds on top. Given the overall MAE is ~EUR 12.8M but the worst
+individual errors reach ~EUR 81M concentrated in a small number of star
+players, it's fair to say intangibles this model can't see account for a
+small fraction of *total* prediction count that's wrong but a large
+fraction of the *largest* errors by euro amount - the model is good at
+pricing depth players and bad at pricing stars, which is the opposite of
+what a scout would find most useful.
+
+**A decade also introduces a problem 4 seasons mostly hid: non-stationary
+prices.** See the "widening the window" note above - none of these models
+know what year a row is from, so a decade of transfer-market inflation
+gets absorbed into the error term instead of being explained. This is
+very likely the single largest driver of the R² drop from 0.62 (4 seasons)
+to 0.48 (10 seasons), and it's a more fundamental limitation than any of
+the feature-level issues above: it's not a missing feature so much as a
+violated assumption (that the stats-to-value relationship is constant
+over the training window), and it would keep getting worse the further
+back the window is extended.
 
 ## Feature list
 

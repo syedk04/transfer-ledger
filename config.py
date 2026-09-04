@@ -55,7 +55,7 @@ COMPETITION_ID = "GB1"  # Premier League, per competitions.csv
 # 2025-26) already has all 380 matches played, so it is the most recently
 # *completed* season as of today, not 2024.
 LAST_COMPLETED_SEASON = 2025
-N_SEASONS = 4
+N_SEASONS = 10  # "the last decade" -> 2016-17 through 2025-26
 SEASONS = list(range(LAST_COMPLETED_SEASON - N_SEASONS + 1, LAST_COMPLETED_SEASON + 1))
 
 # Train/test split is by season, not random — see build_dataset.py / train.py
