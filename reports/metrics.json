@@ -1,0 +1,31 @@
+{
+  "linear_regression": {
+    "mae_eur": 10809573.117284566,
+    "rmse_eur": 16969092.026909824,
+    "r2_log_scale": 0.6244094734084233
+  },
+  "ridge": {
+    "mae_eur": 10808850.117541475,
+    "rmse_eur": 16971402.08697297,
+    "r2_log_scale": 0.6239993815367,
+    "selected_alpha": 0.1
+  },
+  "random_forest": {
+    "mae_eur": 10976277.144631237,
+    "rmse_eur": 17677455.669541083,
+    "r2_log_scale": 0.6029798500853774
+  },
+  "position_median_baseline": {
+    "mae_eur": 15712869.198312236,
+    "rmse_eur": 24341083.240754373,
+    "r2_log_scale": 0.06771174471764352
+  },
+  "train_seasons": [
+    2022,
+    2023,
+    2024
+  ],
+  "test_season": 2025,
+  "n_train": 1465,
+  "n_test": 474
+}
