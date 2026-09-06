@@ -19,11 +19,11 @@ pip install -r requirements.txt
 
 python -m src.fetch            # download + cache raw CSVs into data/raw/
 python -m src.build_dataset    # -> data/processed/player_seasons.csv
-python -m src.train            # trains all 3 models, writes reports/metrics.json
+python -m src.train            # trains all 4 models, writes reports/metrics.json
 python -m src.visualize        # writes 4 PNG charts to reports/
 
 python -m src.predict "Bukayo Saka" --season 2024
-python -m src.predict "Erling Haaland" --season 2025 --model random_forest
+python -m src.predict "Erling Haaland" --season 2025 --model xgboost
 
 pytest -q                      # unit tests for feature engineering + age calc
 ```
@@ -39,7 +39,7 @@ are cached on disk and only re-downloaded with `force=True`.
 | `src/fetch.py` | Download + cache the 5 raw CSVs |
 | `src/build_dataset.py` | Aggregate appearances to one row per player per season, join player attributes and the market value *current at that season's end* |
 | `src/features.py` | Filter low-minute rows, engineer `*_per_90`, `age_squared`, log1p the target |
-| `src/train.py` | Fit LinearRegression / RidgeCV / RandomForest inside a shared `Pipeline`, evaluate on the held-out season, persist models |
+| `src/train.py` | Fit LinearRegression / RidgeCV / RandomForest / XGBoost inside a shared `Pipeline`, evaluate on the held-out season, persist models |
 | `src/predict.py` | CLI: look up one player-season's predicted vs actual value |
 | `src/visualize.py` | The 4 required matplotlib charts |
 
@@ -51,6 +51,12 @@ are cached on disk and only re-downloaded with `force=True`.
 | Linear Regression | 12,820,811 | 19,543,224 | 0.482 |
 | **Ridge** (α≈0.032, 5-fold CV) | **12,820,757** | **19,543,142** | **0.482** |
 | Random Forest | 12,922,338 | 20,070,577 | 0.443 |
+| XGBoost | 12,550,113 | 19,708,223 | 0.497 |
+
+XGBoost was added as a fourth model - unlike Ridge's coefficients, its
+predictions aren't directly interpretable from the model itself, which is
+exactly why SHAP-based explanations exist; see the comparison paragraph
+below for whether the accuracy gain is actually worth that tradeoff.
 
 R² is reported on the log1p scale because that's the scale the models were
 actually fit on and optimized for; an R² computed on raw euros would be

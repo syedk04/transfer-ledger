@@ -22,6 +22,7 @@ MODEL_PATHS = {
     "linear_regression": MODELS_DIR / "linear_regression.joblib",
     "ridge": MODELS_DIR / "ridge.joblib",
     "random_forest": MODELS_DIR / "random_forest.joblib",
+    "xgboost": MODELS_DIR / "xgboost.joblib",
 }
 METRICS_JSON = REPORTS_DIR / "metrics.json"
 PREDICTIONS_CSV = REPORTS_DIR / "test_predictions.csv"
@@ -30,6 +31,26 @@ PREDICTIONS_CSV = REPORTS_DIR / "test_predictions.csv"
 # it gets nearly identical accuracy but with stable, trustworthy coefficients
 # (see train.py docstring on why OLS coefficients are unreliable here).
 DEFAULT_MODEL = "ridge"
+
+# The model the upcoming SHAP-explainability / agent pipeline will use.
+# Deliberately separate from DEFAULT_MODEL: SHAP's fast TreeExplainer needs
+# a tree-based model, and Ridge's own coefficients already serve as its
+# "explanation" - so the interpretable linear baseline (predict.py's
+# default) and the model the agent explains are allowed to be different
+# models on purpose, not a change of mind about which is "best."
+SCOUTING_MODEL = "xgboost"
+
+# --- XGBoost hyperparameters ------------------------------------------------
+# This is not a hyperparameter-search project - these are sane, modestly
+# tuned defaults, not a tuned optimum. n_estimators/max_depth/learning_rate
+# are kept conservative (shallow trees, slow learning rate) because the
+# training set is small (~4,258 rows): a deep, fast-learning boosted model
+# would overfit noise in individual players' stats rather than the general
+# stats-to-value relationship, the same overfitting risk flagged for
+# RandomForest above.
+XGBOOST_N_ESTIMATORS = 300
+XGBOOST_MAX_DEPTH = 3
+XGBOOST_LEARNING_RATE = 0.05
 
 # --- Remote data source --------------------------------------------------
 # transfermarkt-datasets (CC0) publishes gzipped CSV exports behind this

@@ -1,4 +1,4 @@
-"""Train, evaluate, and persist the three regression models.
+"""Train, evaluate, and persist the four regression models.
 
 Why log1p(market_value) instead of raw euros
 ----------------------------------------------
@@ -37,6 +37,7 @@ import json
 import joblib
 import numpy as np
 import pandas as pd
+import xgboost as xgb
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
@@ -58,6 +59,9 @@ from config import (
     TARGET_COL,
     TEST_SEASON,
     TRAIN_SEASONS,
+    XGBOOST_LEARNING_RATE,
+    XGBOOST_MAX_DEPTH,
+    XGBOOST_N_ESTIMATORS,
 )
 from src.features import build_feature_matrix
 
@@ -127,6 +131,25 @@ def build_models() -> dict[str, Pipeline]:
                     "model",
                     RandomForestRegressor(
                         n_estimators=300,
+                        random_state=RANDOM_STATE,
+                        n_jobs=-1,
+                    ),
+                ),
+            ]
+        ),
+        # Shallow trees (max_depth=3) + a slow learning rate + 300 rounds is
+        # the standard "don't overfit a small dataset" boosting recipe -
+        # many weak trees correcting each other's residuals generalizes
+        # better here than a few deep, high-variance trees would.
+        "xgboost": Pipeline(
+            [
+                ("pre", build_preprocessor()),
+                (
+                    "model",
+                    xgb.XGBRegressor(
+                        n_estimators=XGBOOST_N_ESTIMATORS,
+                        max_depth=XGBOOST_MAX_DEPTH,
+                        learning_rate=XGBOOST_LEARNING_RATE,
                         random_state=RANDOM_STATE,
                         n_jobs=-1,
                     ),
