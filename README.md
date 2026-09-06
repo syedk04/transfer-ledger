@@ -82,6 +82,25 @@ has no tuning to avoid overfitting to idiosyncratic training-season
 players. This is a real, checkable result, not a hand-wave - see
 `reports/metrics.json`.
 
+**XGBoost vs Ridge: a real but modest win, and not a clean sweep.** XGBoost
+edges out Ridge on MAE (EUR 12.55M vs EUR 12.82M, ~2.1% lower) and on R²
+(0.497 vs 0.482, log scale), but it is actually *worse* than Ridge on RMSE
+(EUR 19.71M vs EUR 19.54M, ~0.8% higher). Since RMSE squares errors before
+averaging, it weights the largest mistakes far more heavily than MAE does
+- so this split means XGBoost is a bit more accurate on the *typical*
+player but slightly less reliable on the handful of largest misses (the
+same stars - Haaland, Saliba, Rice - that already dominate every model's
+worst errors). Put together, XGBoost is a small, genuine improvement, not
+a dominant one: on this dataset it does not clearly justify giving up
+Ridge's directly-readable coefficients for a black-box model, which is
+exactly the gap SHAP is meant to close. That is why XGBoost is kept
+alongside Ridge rather than replacing it - `SCOUTING_MODEL` in
+`config.py` marks XGBoost as the model the upcoming SHAP-explainability
+and agent pipeline will explain (SHAP's fast `TreeExplainer` needs a
+tree-based model to work), while `DEFAULT_MODEL` stays Ridge, whose own
+coefficients are already its explanation and remain what `predict.py`'s
+CLI uses by default.
+
 **Widening the window from 4 seasons to 10 seasons actually lowered R²**
 (0.62 -> 0.48) rather than raising it, which is the single most important
 result of extending the scope and is worth understanding rather than
