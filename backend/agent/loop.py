@@ -1,10 +1,10 @@
 """The hand-rolled tool-use agent loop.
 
 Deliberately not a framework (no LangGraph/CrewAI): this is a plain loop
-over Groq's OpenAI-compatible chat-completions API, per Anthropic's own
-"Building Effective AI Agents" guidance to start with the simplest thing
-that works and only add structure once that's demonstrably insufficient -
-four tools and one fixed synthesis step never got there.
+over Groq's OpenAI-compatible chat-completions API, following the general
+agent-engineering guidance to start with the simplest thing that works
+and only add structure once that's demonstrably insufficient - four tools
+and one fixed synthesis step never got there.
 
 Design choices worth calling out:
 - The LLM is NEVER trusted to invent the numbers in the final report.
