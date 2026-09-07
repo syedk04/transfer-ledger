@@ -94,6 +94,40 @@ def build_feature_matrix(
     return X, y, meta
 
 
+def find_player_row(meta: pd.DataFrame, name: str, season: int) -> int:
+    """Resolve a (name, season) pair to a single row index in `meta` (and,
+    by construction, the same-index row in the X/y returned alongside it
+    by build_feature_matrix()).
+
+    Shared by predict.py and explain.py so the matching rules - case
+    insensitive substring match, requiring the match be unambiguous - live
+    in exactly one place instead of drifting apart if edited separately.
+
+    Raises ValueError if no row matches, or if more than one player matches
+    the given name (season is still assumed unique per player).
+    """
+    name_mask = meta["name"].str.contains(name, case=False, na=False)
+    season_mask = meta["season"] == season
+    matches = meta[name_mask & season_mask]
+
+    if matches.empty:
+        available = sorted(meta.loc[name_mask, "season"].unique().tolist())
+        if available:
+            raise ValueError(
+                f"No {season} season row for a player matching '{name}'. "
+                f"Seasons available for this player: {available}. "
+                "(A player-season is also dropped upstream if they played "
+                "fewer than MIN_MINUTES_PLAYED minutes that season.)"
+            )
+        raise ValueError(f"No player found matching '{name}'.")
+
+    if len(matches) > 1:
+        names = matches["name"].unique().tolist()
+        raise ValueError(f"'{name}' matches multiple players: {names}. Be more specific.")
+
+    return matches.index[0]
+
+
 if __name__ == "__main__":
     X, y, meta = build_feature_matrix()
     print(X.head())

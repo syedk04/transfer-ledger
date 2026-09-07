@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from config import DEFAULT_MODEL, MODEL_PATHS, TARGET_COL
-from src.features import build_feature_matrix
+from src.features import build_feature_matrix, find_player_row
 
 
 def _format_eur(value: float) -> str:
@@ -38,29 +38,9 @@ def predict_player(name: str, season: int, model_name: str = DEFAULT_MODEL) -> d
 
     X, y, meta = build_feature_matrix()
 
-    # Case-insensitive substring match so "saka" or "bukayo saka" both work,
-    # but require it be unambiguous - guessing between two matches would be
-    # worse than just asking the user to be more specific.
-    name_mask = meta["name"].str.contains(name, case=False, na=False)
-    season_mask = meta["season"] == season
-    matches = meta[name_mask & season_mask]
-
-    if matches.empty:
-        available = sorted(meta.loc[name_mask, "season"].unique().tolist())
-        if available:
-            raise ValueError(
-                f"No {season} season row for a player matching '{name}'. "
-                f"Seasons available for this player: {available}. "
-                "(A player-season is also dropped upstream if they played "
-                "fewer than MIN_MINUTES_PLAYED minutes that season.)"
-            )
-        raise ValueError(f"No player found matching '{name}'.")
-
-    if len(matches) > 1:
-        names = matches["name"].unique().tolist()
-        raise ValueError(f"'{name}' matches multiple players: {names}. Be more specific.")
-
-    idx = matches.index[0]
+    # Matching rules (case-insensitive substring, must be unambiguous) live
+    # in features.find_player_row so predict.py and explain.py share them.
+    idx = find_player_row(meta, name, season)
     x_row = X.loc[[idx]]
     actual_eur = float(meta.loc[idx, TARGET_COL])
 
