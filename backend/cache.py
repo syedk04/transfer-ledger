@@ -40,7 +40,83 @@ def _connect() -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS news_cache (
+            player_name TEXT NOT NULL,
+            week_key TEXT NOT NULL,
+            response_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (player_name, week_key)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS news_credit_usage (
+            usage_date TEXT PRIMARY KEY,
+            credits_used INTEGER NOT NULL
+        )
+        """
+    )
     return conn
+
+
+def get_cached_news(player_name: str, week_key: str) -> list[dict[str, Any]] | None:
+    """Return a previously cached NewsData response for this player+week, or
+    None on a miss. News doesn't need to be re-fetched more than once a
+    week for a given player (see search_news's docstring) - caching by
+    (player, ISO week) rather than per-request stretches the 200
+    credits/day free-tier budget considerably further than one query per
+    scouting-report request.
+    """
+    key = (player_name.strip().lower(), week_key)
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT response_json FROM news_cache WHERE player_name = ? AND week_key = ?", key
+        ).fetchone()
+    finally:
+        conn.close()
+    return json.loads(row[0]) if row else None
+
+
+def store_news(player_name: str, week_key: str, articles: list[dict[str, Any]]) -> None:
+    key = (player_name.strip().lower(), week_key)
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO news_cache (player_name, week_key, response_json, created_at) "
+            "VALUES (?, ?, ?, datetime('now'))",
+            (*key, json.dumps(articles)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_credits_used_today(usage_date: str) -> int:
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT credits_used FROM news_credit_usage WHERE usage_date = ?", (usage_date,)
+        ).fetchone()
+    finally:
+        conn.close()
+    return row[0] if row else 0
+
+
+def record_credit_usage(usage_date: str, credits: int) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO news_credit_usage (usage_date, credits_used) VALUES (?, ?) "
+            "ON CONFLICT(usage_date) DO UPDATE SET credits_used = credits_used + excluded.credits_used",
+            (usage_date, credits),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _key(player_name: str, season: int, model: str) -> tuple[str, int, str]:

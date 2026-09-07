@@ -6,8 +6,8 @@ and the actual Python callable to invoke. Centralizing this here means
 backend/agent/loop.py never needs an if/elif chain over tool names - it
 just looks the name up.
 
-Tools are added here one at a time as they're built (get_player_stats
-first, then run_valuation, explain_valuation, search_news).
+All four tools (get_player_stats, run_valuation, explain_valuation,
+search_news) are now registered here.
 """
 
 from __future__ import annotations
@@ -18,11 +18,14 @@ from backend.agent.tools.valuation import TOOL_SCHEMA as VALUATION_SCHEMA
 from backend.agent.tools.valuation import run_valuation
 from backend.agent.tools.explain import TOOL_SCHEMA as EXPLAIN_SCHEMA
 from backend.agent.tools.explain import explain_valuation
+from backend.agent.tools.news import TOOL_SCHEMA as NEWS_SCHEMA
+from backend.agent.tools.news import search_news
 
 TOOL_REGISTRY = {
     "get_player_stats": {"schema": PLAYER_STATS_SCHEMA, "callable": get_player_stats},
     "run_valuation": {"schema": VALUATION_SCHEMA, "callable": run_valuation},
     "explain_valuation": {"schema": EXPLAIN_SCHEMA, "callable": explain_valuation},
+    "search_news": {"schema": NEWS_SCHEMA, "callable": search_news},
 }
 
 
