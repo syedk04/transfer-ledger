@@ -16,10 +16,13 @@ from backend.agent.tools.player_stats import TOOL_SCHEMA as PLAYER_STATS_SCHEMA
 from backend.agent.tools.player_stats import get_player_stats
 from backend.agent.tools.valuation import TOOL_SCHEMA as VALUATION_SCHEMA
 from backend.agent.tools.valuation import run_valuation
+from backend.agent.tools.explain import TOOL_SCHEMA as EXPLAIN_SCHEMA
+from backend.agent.tools.explain import explain_valuation
 
 TOOL_REGISTRY = {
     "get_player_stats": {"schema": PLAYER_STATS_SCHEMA, "callable": get_player_stats},
     "run_valuation": {"schema": VALUATION_SCHEMA, "callable": run_valuation},
+    "explain_valuation": {"schema": EXPLAIN_SCHEMA, "callable": explain_valuation},
 }
 
 
