@@ -22,7 +22,9 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.cache import get_cached_report, store_report
 from backend.schemas import KeyFactor, ReportRequest, ScoutingReport
+from config import SCOUTING_MODEL
 from src.explain import explain_prediction
 from src.predict import predict_player
 
@@ -75,9 +77,27 @@ def report(request: ReportRequest) -> ScoutingReport:
     ValueError for an unmatched or ambiguous name/season - that's a client
     input error, not a server fault, so it's translated to a 404 here
     instead of propagating into an unhandled 500.
+
+    Checked against backend.cache before doing any real work: repeat
+    requests for the same (player, season, model) are the expected common
+    case (someone re-opening the dashboard, or the agent's own retries in
+    a later commit), and re-running the pipeline for those would be pure
+    waste even though this stub doesn't yet spend any paid/rate-limited
+    credit - the cache is wired in now so later commits (Groq, NewsData)
+    get it for free instead of needing their own follow-up commit.
     """
+    cached = get_cached_report(request.player_name, request.season, SCOUTING_MODEL)
+    if cached is not None:
+        return ScoutingReport(**cached)
+
     try:
-        prediction = predict_player(request.player_name, request.season)
+        # Explicitly SCOUTING_MODEL, not predict_player's own default (ridge,
+        # the interpretable baseline predict.py's CLI favors) - explain_
+        # prediction() only supports SCOUTING_MODEL (SHAP needs a tree
+        # model), so the predicted value and its SHAP explanation must come
+        # from the same model or predicted_value_eur/key_factors would
+        # silently describe two different predictions.
+        prediction = predict_player(request.player_name, request.season, model_name=SCOUTING_MODEL)
         explanation = explain_prediction(request.player_name, request.season)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -97,7 +117,7 @@ def report(request: ReportRequest) -> ScoutingReport:
         for rank, contribution in enumerate(explanation["contributions"][:TOP_N_FACTORS], start=1)
     ]
 
-    return ScoutingReport(
+    scouting_report = ScoutingReport(
         player=prediction["name"],
         season=prediction["season"],
         predicted_value_eur=prediction["predicted_eur"],
@@ -112,3 +132,5 @@ def report(request: ReportRequest) -> ScoutingReport:
         ],
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
+    store_report(prediction["name"], prediction["season"], SCOUTING_MODEL, scouting_report.model_dump())
+    return scouting_report
