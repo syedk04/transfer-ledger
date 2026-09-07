@@ -60,7 +60,13 @@ function maxAbsShap(factors: KeyFactor[]): number {
 }
 
 function ShapBar({ factor, maxAbs }: { factor: KeyFactor; maxAbs: number }) {
-  const widthPct = Math.max(12, 100 * (1 - (factor.magnitude_rank - 1) / maxAbs))
+  // Bars are anchored at the 50% center line and extend outward toward
+  // ONE edge only, so the usable range is 0-50% of the track's full
+  // width, not 0-100% - halving here is what keeps the widest (rank 1)
+  // bar from overflowing past the track into the sign indicator next to
+  // it (a real bug caught by actually rendering this and looking at it,
+  // not just reading the code).
+  const halfWidthPct = Math.max(6, 50 * (1 - (factor.magnitude_rank - 1) / maxAbs))
   const isPositive = factor.direction === 'positive'
 
   return (
@@ -68,11 +74,11 @@ function ShapBar({ factor, maxAbs }: { factor: KeyFactor; maxAbs: number }) {
       <span className="w-36 shrink-0 truncate text-right text-sm text-[var(--text-secondary)]">
         {factor.feature}
       </span>
-      <div className="relative h-5 flex-1 rounded bg-[var(--baseline)]/20">
+      <div className="relative h-5 flex-1 overflow-hidden rounded bg-[var(--baseline)]/20">
         <div
           className="absolute top-0 h-5 rounded"
           style={{
-            width: `${widthPct}%`,
+            width: `${halfWidthPct}%`,
             left: isPositive ? '50%' : undefined,
             right: isPositive ? undefined : '50%',
             background: isPositive ? 'var(--pos)' : 'var(--neg)',
