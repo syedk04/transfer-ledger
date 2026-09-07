@@ -1,0 +1,20 @@
+# Render free web-service config for the FastAPI backend.
+# Deploy: connect this repo in the Render dashboard, it picks this file up
+# automatically ("Blueprint"). Set GROQ_API_KEY / NEWSDATA_API_KEY as
+# secret env vars in Render's dashboard - never commit real keys here.
+#
+# Free-tier tradeoff (documented in README): this service spins down after
+# ~15 min of inactivity; the first request after that can take 30-60s+ to
+# cold-start. Acceptable for a portfolio demo, not for a real product.
+services:
+  - type: web
+    name: transfer-value-scouting-api
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt -r backend/requirements.txt && python -m src.fetch && python -m src.build_dataset && python -m src.train"
+    startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: NEWSDATA_API_KEY
+        sync: false

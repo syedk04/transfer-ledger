@@ -1,21 +1,80 @@
-# Premier League Transfer Value Predictor
+# Premier League Transfer Value Predictor — Scouting Analyst
 
-A learning project: predict a Premier League player's market value (EUR)
-from simple season stats (goals, assists, minutes, age, position...), then
-compare the prediction against the player's actual market value. Built to
-learn regression fundamentals - log-transforming a skewed target, why a
-random train/test split leaks information here, reading linear model
-coefficients under collinearity, and where a linear model is simply the
-wrong tool.
+A Premier League player-valuation model (v1) extended into an agentic
+scouting analyst (v2): given a player name, the system runs a trained
+XGBoost regression, explains that specific prediction with SHAP feature
+attributions, searches for recent real-world context (form, injuries,
+contract situation), and has a hand-rolled tool-using LLM agent
+synthesize all of it into a structured, cited scouting report - grounded
+in the actual model output, not invented.
 
 Data: [transfermarkt-datasets](https://github.com/dcaribou/transfermarkt-datasets)
 (CC0). Scope: Premier League only (`competition_id == "GB1"`), last 10
 completed seasons (a full decade: 2016-17 through 2025-26).
 
-## How to run
+## What changed from v1 to v2, and why
+
+v1 was a pure offline ML exercise: fetch data, engineer features, fit
+Ridge/LinearRegression/RandomForest, evaluate on a held-out season, done.
+v2 keeps every line of that pipeline (`config.py`, `src/*.py`) unchanged
+and builds a serving + reasoning layer on top of it:
+
+- **XGBoost** added as a fourth model, evaluated side by side with Ridge
+  (see Results below) - a modest but real accuracy win, not large enough
+  alone to replace Ridge's interpretable coefficients.
+- **SHAP** (`src/explain.py`) explains one specific XGBoost prediction at
+  a time - which stats pushed this player's valuation up or down, and by
+  how much (log-scale, additive) - rather than only reporting global
+  feature importance.
+- **Four agent tools** (`backend/agent/tools/`) wrap the existing
+  pipeline (`get_player_stats`, `run_valuation`, `explain_valuation`) plus
+  one genuinely new integration (`search_news`, via NewsData.io's free
+  tier) as small, independently-testable, LLM-callable functions.
+- **A hand-rolled agent loop** (`backend/agent/loop.py`) against Groq's
+  free API - a plain loop over an OpenAI-compatible chat-completions call,
+  not a framework (no LangGraph/CrewAI): four tools and one fixed
+  synthesis step never justified that complexity. The LLM is never
+  trusted to invent the report's actual numbers - predicted value comes
+  straight from the model, and every SHAP factor or news citation in the
+  final report must match something a tool call actually returned, or it
+  is silently dropped (see `_assemble_report` in `loop.py`).
+- **FastAPI backend** (`backend/`) exposing one `POST /report` endpoint,
+  with a SQLite cache and a deterministic stub fallback when no Groq key
+  is configured, so the API is never unusable without external
+  credentials.
+- **React/Vite/TS/Tailwind dashboard** (`frontend/`) - search a player,
+  see the number, a SHAP bar chart, the cited report, and an export
+  button.
+- **`EVAL.md`** - the pipeline run for real against 12 known transfers,
+  honest about what could and couldn't be verified without live API keys.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A[transfermarkt-datasets CSVs] --> B[src/build_dataset.py]
+    B --> C[src/features.py]
+    C --> D[src/train.py\nRidge + XGBoost]
+    D --> E[(models/*.joblib)]
+    E --> F[src/explain.py\nSHAP TreeExplainer]
+    E --> G[src/predict.py]
+    G --> H[backend/agent/tools\nget_player_stats\nrun_valuation\nexplain_valuation]
+    F --> H
+    I[NewsData.io] --> J[search_news tool]
+    H --> K[backend/agent/loop.py\nGroq tool-use loop]
+    J --> K
+    K --> L[ScoutingReport\nPydantic schema]
+    L --> M[backend/main.py\nFastAPI /report]
+    M --> N[backend/cache.py\nSQLite]
+    M --> O[frontend/\nReact dashboard]
+```
+
+## How to run locally
+
+**Backend + ML pipeline:**
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -r backend/requirements.txt
 
 python -m src.fetch            # download + cache raw CSVs into data/raw/
 python -m src.build_dataset    # -> data/processed/player_seasons.csv
@@ -23,24 +82,117 @@ python -m src.train            # trains all 4 models, writes reports/metrics.jso
 python -m src.visualize        # writes 4 PNG charts to reports/
 
 python -m src.predict "Bukayo Saka" --season 2024
-python -m src.predict "Erling Haaland" --season 2025 --model xgboost
+python -m src.explain "Bukayo Saka" --season 2024   # SHAP breakdown (xgboost only)
 
-pytest -q                      # unit tests for feature engineering + age calc
+cp .env.example .env           # add GROQ_API_KEY / NEWSDATA_API_KEY (see below) - optional
+uvicorn backend.main:app --reload --port 8000
+
+pytest -q                      # full suite: src/, backend/agent/tools, agent loop, cache, API
 ```
 
-Re-running `fetch`/`build_dataset`/`train` is safe and idempotent - raw CSVs
-are cached on disk and only re-downloaded with `force=True`.
+Without a `.env`, `POST /report` still works - it falls back to a
+deterministic stub (real model + real SHAP, honest placeholder text
+instead of LLM synthesis). Re-running `fetch`/`build_dataset`/`train` is
+safe and idempotent - raw CSVs are cached on disk and only re-downloaded
+with `force=True`.
 
-## Pipeline
+**Frontend:**
+
+```bash
+cd frontend
+npm install
+cp .env.example .env.local     # VITE_API_BASE_URL, defaults to localhost:8000
+npm run dev
+```
+
+**Evaluation harness:**
+
+```bash
+python -m scripts.run_eval      # writes EVAL.md against 12 real players
+```
+
+### Free-tier accounts needed (all genuinely free, no trial credits)
+
+| Service | Used for | Free tier |
+|---|---|---|
+| [Groq](https://console.groq.com) | Agent LLM (`llama-3.3-70b-versatile`) | No cost, rate-limited |
+| [NewsData.io](https://newsdata.io) | `search_news` tool | 200 credits/day, last 48h only |
+| [Render](https://render.com) | Backend hosting (optional) | Free web service, spins down when idle |
+| [Cloudflare Pages](https://pages.cloudflare.com) | Frontend hosting (optional) | Free static hosting |
+
+## Deployment
+
+- **Backend -> Render** (`render.yaml` at repo root): connect the repo as
+  a Blueprint, set `GROQ_API_KEY`/`NEWSDATA_API_KEY` as secret env vars in
+  Render's dashboard. Free tier spins the service down after inactivity;
+  **the first request after idle can take 30-60s+** while it cold-starts
+  - a normal, explainable tradeoff for a free-tier demo, not a bug to hide.
+- **Frontend -> Cloudflare Pages**: connect the repo, set the project
+  root to `frontend/`, build command `npm run build`, output directory
+  `dist`. Set `VITE_API_BASE_URL` to the deployed Render URL as a
+  Cloudflare Pages environment variable. No extra config file needed
+  beyond those dashboard settings.
+
+Deploying both requires your own free Render/Cloudflare accounts - the
+config above is provided and tested locally, but actually standing up
+the live services (and tightening `backend/main.py`'s CORS
+`allow_origins` from `"*"` to the real Pages origin once it exists) is a
+step only you can complete with your own accounts.
+
+## Limitations
+
+**Hallucination risk on the agent's free-text reasoning.** Mitigated,
+not eliminated: the predicted value, model name, every `key_factors`
+entry, and every `news_context` citation are grounded against real tool
+output (`backend/agent/loop.py`'s `_assemble_report` drops anything the
+LLM cites that no tool call actually returned). What is *not* grounded -
+the confidence level, its stated reasoning, and the explanatory sentences
+- is genuinely the LLM's own synthesis and could still be wrong or
+poorly calibrated in ways this project doesn't automatically catch. See
+`EVAL.md` for what this build environment could and couldn't verify
+directly.
+
+**Free-tier constraints, accepted as reasonable for a portfolio demo:**
+Groq's rate limits (not cost) become the real constraint under load;
+NewsData's 200 credits/day is shared across every visitor to a deployed
+instance, not per-user, and is tracked with a simple daily counter
+(`backend/cache.py`) that degrades to "news unavailable" rather than
+crashing once spent; Render's free web service cold-starts after
+inactivity; SQLite's cache (chosen over Supabase - see `backend/cache.py`'s
+docstring for the tradeoff) is wiped on every Render redeploy, not
+durable across them.
+
+**No fine-tuning.** This is pure retrieval (the four tools) plus a
+trained regressor (XGBoost), deliberately, for auditability: every number
+in a report traces back to a specific tool call's output, which would be
+much harder to guarantee from a fine-tuned model's weights.
+
+**Data source gaps hit along the way:**
+- No free, current injury-history data source was found in
+  transfermarkt-datasets or elsewhere - a 5th agent tool for it was
+  explicitly skipped rather than faking one from a proxy, consistent with
+  this project's existing house style (see the Feature list section
+  below on `games_started`).
+- `find_player_row`'s plain substring name matching doesn't fold accents
+  - `EVAL.md` documents a real failure this caused (`"Moises Caicedo"` /
+    `"Martin Odegaard"` don't match the dataset's accented `Moisés
+    Caicedo` / `Martin Ødegaard`), a genuine, fixable gap rather than a
+    hypothetical one.
+- `frontend/src/types/report.ts` hand-mirrors `backend/schemas.py`'s
+  Pydantic models with no codegen step - a manual-sync risk if the schema
+  changes without a matching frontend edit.
+
+## Pipeline (v1, unchanged)
 
 | Module | Responsibility |
 |---|---|
 | `config.py` | Every path, season, ID, and threshold - the single source of truth |
 | `src/fetch.py` | Download + cache the 5 raw CSVs |
 | `src/build_dataset.py` | Aggregate appearances to one row per player per season, join player attributes and the market value *current at that season's end* |
-| `src/features.py` | Filter low-minute rows, engineer `*_per_90`, `age_squared`, log1p the target |
+| `src/features.py` | Filter low-minute rows, engineer `*_per_90`, `age_squared`, log1p the target, plus the shared `find_player_row` lookup |
 | `src/train.py` | Fit LinearRegression / RidgeCV / RandomForest / XGBoost inside a shared `Pipeline`, evaluate on the held-out season, persist models |
 | `src/predict.py` | CLI: look up one player-season's predicted vs actual value |
+| `src/explain.py` | CLI + library: SHAP breakdown of one XGBoost prediction |
 | `src/visualize.py` | The 4 required matplotlib charts |
 
 ## Results (test season: 2025, trained on 2016-2024)
@@ -95,11 +247,11 @@ a dominant one: on this dataset it does not clearly justify giving up
 Ridge's directly-readable coefficients for a black-box model, which is
 exactly the gap SHAP is meant to close. That is why XGBoost is kept
 alongside Ridge rather than replacing it - `SCOUTING_MODEL` in
-`config.py` marks XGBoost as the model the upcoming SHAP-explainability
-and agent pipeline will explain (SHAP's fast `TreeExplainer` needs a
-tree-based model to work), while `DEFAULT_MODEL` stays Ridge, whose own
-coefficients are already its explanation and remain what `predict.py`'s
-CLI uses by default.
+`config.py` marks XGBoost as the model the SHAP-explainability and agent
+pipeline explains (SHAP's fast `TreeExplainer` needs a tree-based model
+to work), while `DEFAULT_MODEL` stays Ridge, whose own coefficients are
+already its explanation and remain what `predict.py`'s CLI uses by
+default.
 
 **Widening the window from 4 seasons to 10 seasons actually lowered R²**
 (0.62 -> 0.48) rather than raising it, which is the single most important
@@ -143,7 +295,7 @@ rather than quietly regressed away.
   an elite, high-reputation, high-marketability player - exactly the
   intangibles a stats-only model cannot see.
 
-## Honest limitations
+## Honest limitations (of the model itself)
 
 **Where a linear model is the wrong tool.** Player value is not a smooth,
 additive function of stats - it has thresholds and interactions a linear
@@ -207,7 +359,9 @@ players, it's fair to say intangibles this model can't see account for a
 small fraction of *total* prediction count that's wrong but a large
 fraction of the *largest* errors by euro amount - the model is good at
 pricing depth players and bad at pricing stars, which is the opposite of
-what a scout would find most useful.
+what a scout would find most useful. `EVAL.md` reconfirms this on an
+independent 12-player sample skewed toward stars (MAE EUR 55.3M there,
+vs EUR 12.55M for the full test season).
 
 **A decade also introduces a problem 4 seasons mostly hid: non-stationary
 prices.** See the "widening the window" note above - none of these models
@@ -246,19 +400,40 @@ silently mislabel past seasons.
 ## Project layout
 
 ```
-config.py                  paths, seasons, thresholds - no magic numbers elsewhere
+config.py                  paths, seasons, thresholds, model + SHAP + agent constants
 src/
   fetch.py                 download + cache raw CSVs
   build_dataset.py         season aggregation + leak-safe valuation join
-  features.py              feature engineering, log1p target
-  train.py                 3 models in sklearn Pipelines, evaluation
+  features.py              feature engineering, log1p target, shared find_player_row
+  train.py                 4 models in sklearn Pipelines, evaluation
   predict.py               CLI lookup
+  explain.py               SHAP per-prediction breakdown (xgboost only)
   visualize.py             the 4 matplotlib charts
+backend/
+  main.py                  FastAPI app: GET /health, POST /report
+  schemas.py                Pydantic ScoutingReport/KeyFactor/NewsCitation
+  cache.py                  SQLite cache: report runs, news-by-week, daily credit counter
+  agent/
+    client.py                Groq client + model constants
+    prompts.py                system + synthesis prompt templates
+    loop.py                   the hand-rolled tool-use loop
+    tools/                     get_player_stats, run_valuation, explain_valuation, search_news
+  tests/                     tool tests, cache tests, mocked-LLM integration test, API tests
+frontend/
+  src/api/client.ts          typed fetch wrapper
+  src/types/report.ts         hand-kept-in-sync TS mirror of backend/schemas.py
+  src/components/             PlayerSearch, ShapChart, ScoutingReportView, ConfidenceBadge, ExportButton
+  src/hooks/useReport.ts       fetch/loading/error state
+scripts/
+  run_eval.py                writes EVAL.md against real transfers
 tests/
   test_build_dataset.py    season-end date + fractional age
   test_features.py         per-90 rates, age_squared, minute filtering, log target
+  test_explain.py           SHAP feature-name remapping + end-to-end
 data/raw/                  cached CSVs (gitignored)
 data/processed/            player_seasons.csv
 models/                    joblib-persisted pipelines (gitignored)
 reports/                   metrics.json, test_predictions.csv, PNG charts
+EVAL.md                    12-player evaluation writeup
+render.yaml                 Render free-tier backend deploy config
 ```
